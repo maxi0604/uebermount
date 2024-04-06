@@ -14,20 +14,7 @@ void die(const char* error) {
     exit(1);
 }
 
-void proc_setgroups_write(void) {
-    int fd = open("/proc/self/setgroups", O_RDWR);
-    if (fd == -1) {
-        die("open");
-    }
-
-    if (write(fd, "deny", strlen("deny")) == -1) {
-        die("write");
-    }
-
-    close(fd);
-}
-
-void wrmap(char* target, char* str) {
+void write_or_die(char* target, char* str) {
     int map = open(target, O_RDWR);
     if (map < 0) {
         die("open");
@@ -55,8 +42,8 @@ int main(int argc, char *argv[])
     char uid_entry[128];
     char gid_entry[128];
 
-    uid_t old_uid = geteuid();
-    uid_t old_gid = getegid();
+    uid_t old_uid = getuid();
+    uid_t old_gid = getgid();
 
     snprintf(mountopts, sizeof(mountopts), "lowerdir=%s,upperdir=%s,workdir=%s", source, target, "tempdir");
     snprintf(uid_entry, sizeof(uid_entry), "%u %u 1\n", old_uid, old_uid);
@@ -66,9 +53,9 @@ int main(int argc, char *argv[])
         die("unshare");
     }
 
-    wrmap("/proc/self/uid_map", uid_entry);
-    proc_setgroups_write();
-    wrmap("/proc/self/gid_map", gid_entry);
+    write_or_die("/proc/self/uid_map", uid_entry);
+    write_or_die("/proc/self/setgroups", "deny");
+    write_or_die("/proc/self/gid_map", gid_entry);
 
     if (mount("overlayfs ignores source", target, "overlay", 0, mountopts)) {
         die("mount");
