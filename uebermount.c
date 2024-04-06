@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <spawn.h>
+#include <sys/wait.h>
 
 extern char** environ;
 void proc_setgroups_write(void) {
@@ -64,43 +65,60 @@ int main(int argc, char *argv[])
     uid_t old_gid = getegid();
 
     snprintf(mountopts, sizeof(mountopts), "lowerdir=%s,upperdir=%s,workdir=%s", source, target, "tempdir");
-    puts(mountopts);
-    // snprintf(uid_entry, sizeof(uid_entry), "1 1000 65535\n");
-    // snprintf(gid_entry, sizeof(uid_entry), "0 1000 65535\n");
-    // snprintf(uid_entry, sizeof(uid_entry), "\t0\t100000\t65535\n\t1 \t100000 \t65536\n");
-    // snprintf(gid_entry, sizeof(gid_entry), "\t0\t1000\t1\n\t1 \t100000 \t65536\n");
-    //
-    char my_pid[128];
-    snprintf(my_pid, sizeof(my_pid), "%u\n", getpid());
 
-    pid_t child;
-    char* uid_argv[] = { "newuidmap", my_pid };
-    char* gid_argv[] = { "newgidmap", my_pid };
-    posix_spawnp(&child, child_argv[0], NULL, NULL, environ, child_argv);
-    snprintf(uid_entry, sizeof(uid_entry), "0 %u 1\n", old_uid);
-    snprintf(gid_entry, sizeof(gid_entry), "0 %u 1\n", old_gid);
+    puts(mountopts);
+    char my_pid[128];
+    snprintf(my_pid, sizeof(my_pid), "%u", getpid());
+
+    int child_pipe[2];
+    pipe(child_pipe);
+
+    pid_t fork_pid = fork();
+    switch (fork_pid) {
+        case -1:
+            perror("fork");
+            break;
+        case 0:
+            {
+                char trash[1];
+                read(child_pipe[0], trash, 1);
+                char* uid_argv[] = { "newuidmap", my_pid, "0", "1000", "1", "1", "100000", "65536", NULL };
+                char* gid_argv[] = { "newgidmap", my_pid, "0", "1000", "1", "1", "100000", "65536", NULL };
+                pid_t child1, child2;
+                posix_spawnp(&child1, uid_argv[0], NULL, NULL, uid_argv, environ);
+                posix_spawnp(&child2, gid_argv[0], NULL, NULL, gid_argv, environ);
+                int stat;
+                waitpid(child1, &stat, 0);
+                waitpid(child2, &stat, 0);
+                return 0;
+            }
+    }
 
     if (unshare(CLONE_NEWUSER | CLONE_NEWNS)) {
         perror("unshare");
     }
 
-    wrmap("/proc/self/uid_map", uid_entry);
-    proc_setgroups_write();
-    wrmap("/proc/self/gid_map", gid_entry);
+    // we are in the namespace. child can now set our uid/gid map
+    // unblock it and wait for its death (i. e. completion)
+    char w = 'r';
+    write(child_pipe[1], &w, 1);
+    int stat;
+    wait(&stat);
 
-    // if (setuid(0)) {
-    //     perror("seteuid");
-    // }
 
+    // we are root in the unpriv user ns.
     if (mount("overlayfs ignores source", target, "overlay", 0, mountopts)) {
         perror("mount");
     }
 
-    if (setuid(old_uid)) {
-        perror("seteuid");
+    if (setgid(old_gid)) {
+        perror("setgid");
     }
 
-    setegid(old_gid);
+    if (setuid(old_uid)) {
+        perror("setuid");
+    }
+
     execvp(argv[3], argv + 3);
     perror("execvp");
 }
