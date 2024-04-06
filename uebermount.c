@@ -1,49 +1,44 @@
 #define _GNU_SOURCE
-#define PATH_LENGTH 1024
 #include <sched.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/mount.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <spawn.h>
+#include <stdlib.h>
 
-extern char** environ;
+void die(const char* error) {
+    perror(error);
+    exit(1);
+}
+
 void proc_setgroups_write(void) {
-    char setgroups_path[PATH_MAX];
-    int fd;
-
-    snprintf(setgroups_path, PATH_MAX, "/proc/self/setgroups");
-
-    fd = open(setgroups_path, O_RDWR);
+    int fd = open("/proc/self/setgroups", O_RDWR);
     if (fd == -1) {
-        perror("open");
+        die("open");
     }
 
     if (write(fd, "deny", strlen("deny")) == -1) {
-        perror("write");
+        die("write");
     }
 
     close(fd);
 }
 
 void wrmap(char* target, char* str) {
-    // "/proc/self/uid_map"
-    puts(target);
-    puts(str);
     int map = open(target, O_RDWR);
     if (map < 0) {
-        perror("open");
+        die("open");
     }
 
     if (write(map, str, strlen(str)) < 0) {
-        perror("write");
+        die("write");
     }
 
     if (close(map)) {
-        perror("close");
+        die("close");
     }
 }
 
@@ -56,19 +51,19 @@ int main(int argc, char *argv[])
 
     char* source = argv[1];
     char* target = argv[2];
-    char mountopts[PATH_LENGTH];
-    char uid_entry[PATH_LENGTH];
-    char gid_entry[PATH_LENGTH];
+    char mountopts[4 * PATH_MAX];
+    char uid_entry[128];
+    char gid_entry[128];
 
     uid_t old_uid = geteuid();
     uid_t old_gid = getegid();
 
     snprintf(mountopts, sizeof(mountopts), "lowerdir=%s,upperdir=%s,workdir=%s", source, target, "tempdir");
-    snprintf(uid_entry, sizeof(uid_entry), "1000 %u 1\n", old_uid);
-    snprintf(gid_entry, sizeof(gid_entry), "1000 %u 1\n", old_gid);
+    snprintf(uid_entry, sizeof(uid_entry), "%u %u 1\n", old_uid, old_uid);
+    snprintf(gid_entry, sizeof(gid_entry), "%u %u 1\n", old_gid, old_gid);
 
     if (unshare(CLONE_NEWUSER | CLONE_NEWNS)) {
-        perror("unshare");
+        die("unshare");
     }
 
     wrmap("/proc/self/uid_map", uid_entry);
@@ -76,14 +71,9 @@ int main(int argc, char *argv[])
     wrmap("/proc/self/gid_map", gid_entry);
 
     if (mount("overlayfs ignores source", target, "overlay", 0, mountopts)) {
-        perror("mount");
+        die("mount");
     }
 
-    if (setuid(old_uid)) {
-        perror("seteuid");
-    }
-
-    setegid(old_gid);
     execvp(argv[3], argv + 3);
     perror("execvp");
 }
