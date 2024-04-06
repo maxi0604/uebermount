@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <spawn.h>
-#include <sys/wait.h>
 
 extern char** environ;
 void proc_setgroups_write(void) {
@@ -65,60 +64,26 @@ int main(int argc, char *argv[])
     uid_t old_gid = getegid();
 
     snprintf(mountopts, sizeof(mountopts), "lowerdir=%s,upperdir=%s,workdir=%s", source, target, "tempdir");
-
-    puts(mountopts);
-    char my_pid[128];
-    snprintf(my_pid, sizeof(my_pid), "%u", getpid());
-
-    int child_pipe[2];
-    pipe(child_pipe);
-
-    pid_t fork_pid = fork();
-    switch (fork_pid) {
-        case -1:
-            perror("fork");
-            break;
-        case 0:
-            {
-                char trash[1];
-                read(child_pipe[0], trash, 1);
-                char* uid_argv[] = { "newuidmap", my_pid, "0", "1000", "1", "1", "100000", "65536", NULL };
-                char* gid_argv[] = { "newgidmap", my_pid, "0", "1000", "1", "1", "100000", "65536", NULL };
-                pid_t child1, child2;
-                posix_spawnp(&child1, uid_argv[0], NULL, NULL, uid_argv, environ);
-                posix_spawnp(&child2, gid_argv[0], NULL, NULL, gid_argv, environ);
-                int stat;
-                waitpid(child1, &stat, 0);
-                waitpid(child2, &stat, 0);
-                return 0;
-            }
-    }
+    snprintf(uid_entry, sizeof(uid_entry), "1000 %u 1\n", old_uid);
+    snprintf(gid_entry, sizeof(gid_entry), "1000 %u 1\n", old_gid);
 
     if (unshare(CLONE_NEWUSER | CLONE_NEWNS)) {
         perror("unshare");
     }
 
-    // we are in the namespace. child can now set our uid/gid map
-    // unblock it and wait for its death (i. e. completion)
-    char w = 'r';
-    write(child_pipe[1], &w, 1);
-    int stat;
-    wait(&stat);
+    wrmap("/proc/self/uid_map", uid_entry);
+    proc_setgroups_write();
+    wrmap("/proc/self/gid_map", gid_entry);
 
-
-    // we are root in the unpriv user ns.
     if (mount("overlayfs ignores source", target, "overlay", 0, mountopts)) {
         perror("mount");
     }
 
-    if (setgid(old_gid)) {
-        perror("setgid");
-    }
-
     if (setuid(old_uid)) {
-        perror("setuid");
+        perror("seteuid");
     }
 
+    setegid(old_gid);
     execvp(argv[3], argv + 3);
     perror("execvp");
 }
