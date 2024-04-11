@@ -12,11 +12,11 @@ This is desirable when, for example, you want to modify a game that requires dir
 # Name
 "ueber-" from German "über" (over), "mount" from file systems terminlogy.
 
-# Building
+# Build
 ```make uebermount```
 
 # License
-MIT.
+MIT
 
-# Contributions
-Anything goes.
+# Contributing
+Feel free to
