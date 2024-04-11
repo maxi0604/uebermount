@@ -5,7 +5,9 @@ This is a small Linux utility program (could've been a gist) that uses overlayfs
   - Such that write operations to the folder by the program affect the writable overlay
   - and read operations read, in the following order:
     - The writable overlay
-    - The last readable "lower directory"
+    - The last readable lowerdir
+    - ...
+    - The first readable lowerdir
 
 This is desirable when, for example, you want to modify a game that requires direct changes to the game files instead of providing a mod API, but don't want other software like Steam to overwrite the changes at the next update.
 
